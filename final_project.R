@@ -46,7 +46,7 @@ get_heart_data <- function(clean_method = 0) {
 # CV FUNCTION
 ####################
 
-# run a repeated cross-validation on the chosen model
+# reusable function to run a repeated cross-validation on the chosen model
 run_cross_validation <- function(data, model_function, k = 5, repeats = 10) {
   
   accuracies <- numeric(k * repeats)
@@ -99,6 +99,18 @@ run_svm <- function(train_data, test_data, kernel, cost, gamma) {
   ))
 }
 
+run_random_forest <- function(train_data, test_data, ntree, mtry) {
+  model <- randomForest(num ~ ., data = train_data, ntree = ntree, mtry = mtry)
+  test_predictions <- predict(model, newdata = test_data)
+  test_predictions <- ifelse(test_predictions > 0.5, 1, 0)
+  accuracy <- mean(test_predictions == test_data$num)
+  
+  return(list(
+    model = model,
+    accuracy = accuracy
+  ))
+}
+
 ####################
 # LOAD DATA
 ####################
@@ -109,8 +121,8 @@ heart_data <- get_heart_data(clean_method = 0)
 # LOGISTIC REGRESSION
 ####################
 
-res <- run_cross_validation(heart_data, run_logistic_regression)
-mean(res)
+logistic_res <- run_cross_validation(heart_data, run_logistic_regression)
+mean(logistic_res)
 
 ####################
 # COEFFICIENT EFFECTS IN LOGISTIC REGRESSION
@@ -171,9 +183,9 @@ pc_data <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], Target = as.fa
 
 for (kernel in kernels) {
   if (kernel == "linear") {
-    svm_model <- svm(Target ~ PC1 + PC2, data = pc_data, kernel = kernel, cost = 1, probability = TRUE)
+    svm_model <- svm(Target ~ PC1 + PC2, data = pc_data, kernel = kernel, cost = 0.1, probability = TRUE)
   } else {
-    svm_model <- svm(Target ~ PC1 + PC2, data = pc_data, kernel = kernel, cost = 1, gamma = 0.1, probability = TRUE)
+    svm_model <- svm(Target ~ PC1 + PC2, data = pc_data, kernel = kernel, cost = 0.1, gamma = 0.1, probability = TRUE)
   }
   
   x_min <- min(pc_data$PC1) - 0.5
@@ -199,18 +211,6 @@ for (kernel in kernels) {
 # RANDOM FOREST
 ####################
 
-run_random_forest <- function(train_data, test_data, ntree, mtry) {
-  model <- randomForest(num ~ ., data = train_data, ntree = ntree, mtry = mtry)
-  test_predictions <- predict(model, newdata = test_data)
-  test_predictions <- ifelse(test_predictions > 0.5, 1, 0)
-  accuracy <- mean(test_predictions == test_data$num)
-  
-  return(list(
-    model = model,
-    accuracy = accuracy
-  ))
-}
-
 ntree_values <- c(50, 100, 200, 400)
 mtry_values <- c(2, 4, 6, 8)
 
@@ -228,7 +228,7 @@ rf_results
 # RANDOM FOREST IMPORTANCE PLOT
 ####################
 
-rf_model <- randomForest(num ~ ., data = train_data, ntree = 50, mtry = 4)
+rf_model <- randomForest(num ~ ., data = train_data, ntree = 100, mtry = 2)
 
 importance_df <- data.frame(
   Variable = rownames(rf_model$importance),
@@ -243,3 +243,26 @@ ggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +
     x = "Predictors",
     y = "Importance"
   )
+
+####################
+# FINAL MODEL COMPARISON USING CHOSEN HYPERPARAMETERS
+####################
+
+svm_res <- run_cross_validation(heart_data, function(train, test) run_svm(train, test, "linear", 0.1, NA))
+random_forest_res <- run_cross_validation(heart_data, function(train, test) run_random_forest(train, test, 100, 2))
+
+results_df <- data.frame(
+  Accuracy = c(logistic_res, svm_res, random_forest_res),
+  Model = factor(
+    c(rep("Logistic Regression", length(logistic_res)),
+      rep("SVM", length(svm_res)),
+      rep("Random Forest", length(random_forest_res)))
+  )
+)
+
+ggplot(results_df, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_boxplot() +
+  labs(title = "Model Accuracy", x = "Model", y = "Accuracy")
+
+mean(svm_res)
+mean(random_forest_res)
